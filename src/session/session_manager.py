@@ -19,13 +19,15 @@ class UserSession:
     websockets: List[WebSocket] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     last_activity: datetime = field(default_factory=datetime.now)
-    
+    execution_context: Dict = field(default_factory=dict)
     # NEW: Step-based execution fields
     persistent: bool = False
     executed_steps: List[Dict] = field(default_factory=list)
     step_memory: str = ""
     current_step_index: int = 0
     stopped: bool = False
+
+    goal_tracker: Optional['GoalTracker'] = None
     
     def update_activity(self):
         """Update last activity timestamp"""
@@ -180,5 +182,7 @@ class SessionManager:
             await self.delete_session(session_id)
         
         logger.info("Session manager shutdown complete")
+
+
 
 

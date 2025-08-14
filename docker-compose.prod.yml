@@ -40,6 +40,7 @@ services:
       - "${VNC_WEB_PORT:-6080}:6080" # noVNC web interface
       - "${VNC_PORT:-5901}:5901" # VNC direct connection
       - "${DEBUG_PORT:-9222}:9222" # Chrome debugging (optional)
+    user: "0:0"
 
     # Environment configuration
     environment:

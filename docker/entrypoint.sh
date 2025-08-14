@@ -27,17 +27,22 @@ error() {
     echo -e "${RED}[ENTRYPOINT]${NC} $1"
 }
 
+safe_touch() {
+    local file_path="$1"
+    touch "$file_path" 2>/dev/null || warn "Could not create $file_path"
+}
+
 # Print startup banner
 print_banner() {
     cat << 'EOF'
     ____                                          __  __          
-   / __ )_________ _      __________  _____      / / / /_______   
-  / __  / ___/ __ \ | /| / / ___/ _ \/ ___/_____/ / / / ___/ _ \  
- / /_/ / /  / /_/ / |/ |/ (__  )  __/ /  /_____/ /_/ (__  )  __/  
+    / __ )_________ _      __________  _____      / / / /_______   
+    / __  / ___/ __ \ | /| / / ___/ _ \/ ___/_____/ / / / ___/ _ \  
+    / /_/ / /  / /_/ / |/ |/ (__  )  __/ /  /_____/ /_/ (__  )  __/  
 /_____/_/   \____/|__/|__/____/\___/_/        \____/____/\___/   
-                                                                  
-           Multi-User Browser Automation API
-                 Production Environment
+                                                                       
+               Multi-User Browser Automation API
+                     Production Environment
 EOF
 }
 
@@ -102,12 +107,28 @@ setup_directories() {
             mkdir -p "$dir"
             info "Created directory: $dir"
         fi
-        
-        # Ensure proper ownership
-        if [ "$(stat -c %U "$dir")" != "browseruse" ]; then
-            chown -R browseruse:browseruse "$dir" 2>/dev/null || warn "Could not change ownership of $dir"
-        fi
+        # Ensure proper ownership (unconditional for reliability with mounted volumes)
+        chown -R browseruse:browseruse "$dir" 2>/dev/null || warn "Could not change ownership of $dir"
     done
+    
+    # Pre-create log files with correct ownership so supervisord (running as browseruse) can write
+    safe_touch /app/logs/supervisord.log
+    safe_touch /app/logs/xvfb.log
+    safe_touch /app/logs/xvfb.error.log
+    safe_touch /app/logs/vnc_setup.log
+    safe_touch /app/logs/vnc_setup.error.log
+    safe_touch /app/logs/x11vnc.log
+    safe_touch /app/logs/x11vnc.error.log
+    safe_touch /app/logs/novnc.log
+    safe_touch /app/logs/novnc.error.log
+    safe_touch /app/logs/browser.log
+    safe_touch /app/logs/browser.error.log
+    safe_touch /app/logs/api_server.log
+    safe_touch /app/logs/api_server.error.log
+    safe_touch /app/logs/monitor.log
+    safe_touch /app/logs/monitor.error.log
+    chown -R browseruse:browseruse /app/logs/ 2>/dev/null || warn "Could not change ownership of /app/logs"
+    info "Created log files with proper ownership"
     
     log "Directory setup completed"
 }
