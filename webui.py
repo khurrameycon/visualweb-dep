@@ -178,353 +178,6 @@ async def send_socket_message_to_session(session: UserSession, message: dict):
     for ws in dead_sockets:
         session.websockets.remove(ws)
         
-# async def run_steps_logic(config: ExecuteStepsRequest, session: UserSession):
-#     """Execute steps with intelligence, adaptation, and goal tracking"""
-#     logger.info(f"🚀 Starting goal-oriented execution for session {session.session_id}")
-    
-#     # Import intelligence modules
-#     from src.intelligence.step_analyzer import StepAnalyzer, AdaptivePlanner
-#     from src.intelligence.goal_tracker import GoalTracker
-    
-#     # Initialize session state safely
-#     if not hasattr(session, 'execution_context') or session.execution_context is None:
-#         session.execution_context = {}
-    
-#     session.execution_context.setdefault('current_url', '')
-#     session.execution_context.setdefault('variables', {})
-#     session.execution_context.setdefault('step_results', [])
-#     session.execution_context.setdefault('memory_chain', '')
-#     session.execution_context.setdefault('adaptations_made', [])
-    
-#     if not hasattr(session, 'executed_steps'):
-#         session.executed_steps = []
-#     if not hasattr(session, 'current_step_index'):
-#         session.current_step_index = 0
-    
-#     def log_to_socket(msg, *args, **kwargs):
-#         log_message = msg % args if args else str(msg)
-#         asyncio.create_task(send_socket_message_to_session(session, {"type": "log", "data": log_message}))
-    
-#     try:
-#         # Initialize LLM
-#         llm = await _initialize_llm_helper(config.llm_provider, config.llm_model_name, config.llm_api_key)
-#         log_to_socket("🧠 Intelligent agent with goal tracking initialized")
-        
-#         # Create browser if needed
-#         if not session.browser:
-#             log_to_socket("🌐 Creating browser...")
-#             session.browser = CustomBrowser(config=BrowserConfig(headless=False))
-#             session.browser_context = await session.browser.new_context(
-#                 config=BrowserContextConfig(
-#                     no_viewport=False, 
-#                     browser_window_size=BrowserContextWindowSize(width=1280, height=720),
-#                     save_downloads_path=f"/tmp/downloads_{session.session_id}"
-#                 )
-#             )
-        
-#         # Initialize Goal Tracker
-#         if not hasattr(session, 'goal_tracker') or session.goal_tracker is None:
-#             # Extract main goal from first step or overall context
-#             main_goal = f"Complete task: {config.steps[0].description if config.steps else 'Execute steps'}"
-#             session.goal_tracker = GoalTracker(main_goal)
-            
-#             # Decompose goal into sub-goals
-#             await session.goal_tracker.decompose_goal(llm)
-#             log_to_socket(f"🎯 Goal set: {main_goal}")
-            
-#             # Send goal information to frontend
-#             await send_socket_message_to_session(session, {
-#                 "type": "goal_initialized",
-#                 "data": {
-#                     "main_goal": main_goal,
-#                     "sub_goals": session.goal_tracker.sub_goals,
-#                     "progress": 0
-#                 }
-#             })
-        
-#         # Convert steps to mutable list for adaptation
-#         current_steps = list(config.steps[config.start_from:])
-#         i = 0
-        
-#         while i < len(current_steps):
-#             step = current_steps[i]
-#             step_dict = {"id": step.id, "action": step.action, "description": step.description, "params": step.params}
-            
-#             log_to_socket(f"🎯 Step {i+1}/{len(current_steps)}: {step.description}")
-            
-#             # GOAL TRACKING: Check alignment before step
-#             await send_socket_message_to_session(session, {
-#                 "type": "thinking", 
-#                 "data": {"step_id": step.id, "phase": "goal_checking", "message": "Checking goal alignment..."}
-#             })
-            
-#             alignment = await session.goal_tracker.check_alignment(
-#                 session.execution_context, 
-#                 step.description, 
-#                 llm
-#             )
-            
-#             # Send goal status update
-#             await send_socket_message_to_session(session, {
-#                 "type": "goal_status",
-#                 "data": {
-#                     "alignment": alignment.get('alignment'),
-#                     "progress": alignment.get('progress_percentage', 0),
-#                     "reasoning": alignment.get('reasoning', ''),
-#                     "next_focus": alignment.get('next_focus', '')
-#                 }
-#             })
-            
-#             # Handle major deviations
-#             if alignment.get('alignment') == 'major_deviation':
-#                 log_to_socket(f"⚠️ Major deviation detected: {alignment.get('reasoning')}")
-                
-#                 correction = await session.goal_tracker.suggest_course_correction(
-#                     alignment.get('reasoning', 'Unknown deviation'),
-#                     session.execution_context,
-#                     llm
-#                 )
-                
-#                 await send_socket_message_to_session(session, {
-#                     "type": "course_correction",
-#                     "data": {
-#                         "deviation_reason": alignment.get('reasoning'),
-#                         "correction": correction,
-#                         "urgency": correction.get('urgency', 'medium')
-#                     }
-#                 })
-                
-#                 log_to_socket(f"🔄 Course correction: {correction.get('action')}")
-                
-#                 # Apply correction if needed
-#                 if correction.get('correction_type') == 'skip_step':
-#                     log_to_socket("⏭️ Skipping step due to course correction")
-#                     i += 1
-#                     continue
-            
-#             # PHASE 1: PRE-STEP ANALYSIS (with goal context)
-#             await send_socket_message_to_session(session, {
-#                 "type": "thinking", 
-#                 "data": {"step_id": step.id, "phase": "analyzing", "message": "Analyzing step with goal context..."}
-#             })
-            
-#             step_analysis = await StepAnalyzer.analyze_before_step(step_dict, session.execution_context, llm, session.goal_tracker)
-#             log_to_socket(f"🧠 Goal: {step_analysis.get('goal', 'Execute step')}")
-            
-#             # Send step start with analysis
-#             await send_socket_message_to_session(session, {
-#                 "type": "step_start", 
-#                 "data": {
-#                     "step_id": step.id,
-#                     "step_number": i + 1,
-#                     "total": len(current_steps),
-#                     "description": step.description,
-#                     "analysis": step_analysis,
-#                     "goal_alignment": step_analysis.get('goal_alignment')
-#                 }
-#             })
-            
-#             # EXECUTE STEP
-#             try:
-#                 # Build intelligent context prompt with goal awareness
-#                 context_prompt = f"""You are an intelligent browser agent working toward a specific goal.
-
-# MAIN GOAL: {session.goal_tracker.main_goal}
-# GOAL PROGRESS: {session.goal_tracker.current_progress}%
-
-# CURRENT STEP:
-# GOAL: {step_analysis.get('goal', step.description)}
-# ACTION: {step.action}
-# PARAMETERS: {json.dumps(step.params)}
-# GOAL CONTRIBUTION: {step_analysis.get('goal_contribution', 'Unknown')}
-
-# CONTEXT:
-# {session.execution_context.get('memory_chain', '')[-400:]}
-
-# EXPECTATIONS: {step_analysis.get('expectations', 'Unknown')}
-# SUCCESS CRITERIA: {step_analysis.get('success_criteria', 'Step completes')}
-
-# IMPORTANT: Stay focused on the main goal. If you encounter distractions (popups, ads, irrelevant content), ignore them and stay on track toward: {session.goal_tracker.main_goal}
-
-# Execute this step intelligently while keeping the main goal in mind."""
-                
-#                 await send_socket_message_to_session(session, {
-#                     "type": "thinking", 
-#                     "data": {"step_id": step.id, "phase": "executing", "message": f"Executing: {step_analysis.get('goal', step.description)}"}
-#                 })
-                
-#                 # Create and run step agent
-#                 step_agent = CustomAgent(
-#                     task=context_prompt,
-#                     llm=llm,
-#                     browser=session.browser,
-#                     browser_context=session.browser_context,
-#                     controller=CustomController(),
-#                     system_prompt_class=CustomSystemPrompt,
-#                     agent_prompt_class=CustomAgentMessagePrompt,
-#                     max_actions_per_step=1,
-#                     use_vision=True,
-#                     max_failures=1
-#                 )
-                
-#                 step_result = await asyncio.wait_for(step_agent.run(max_steps=3), timeout=60.0)
-#                 raw_output = step_result.final_result() or f"Completed step {step.id}"
-                
-#             except Exception as e:
-#                 logger.error(f"❌ Step {step.id} failed: {e}")
-#                 raw_output = f"Step failed: {str(e)}"
-            
-#             # PHASE 1: POST-STEP ANALYSIS (with goal context)
-#             await send_socket_message_to_session(session, {
-#                 "type": "thinking", 
-#                 "data": {"step_id": step.id, "phase": "validating", "message": "Validating results against goal..."}
-#             })
-            
-#             # Update current URL
-#             try:
-#                 current_page = await session.browser_context.get_current_page()
-#                 session.execution_context['current_url'] = current_page.url
-#             except:
-#                 pass
-            
-#             result_analysis = await StepAnalyzer.analyze_after_step(step_dict, raw_output, session.execution_context, llm, session.goal_tracker)
-            
-#             # Check for stuck patterns
-#             if result_analysis.get('stuck_pattern'):
-#                 stuck_info = result_analysis['stuck_pattern']
-#                 log_to_socket(f"🔄 Stuck pattern detected: {stuck_info.get('reason')}")
-                
-#                 await send_socket_message_to_session(session, {
-#                     "type": "stuck_detected",
-#                     "data": {
-#                         "reason": stuck_info.get('reason'),
-#                         "solutions": stuck_info.get('solutions', []),
-#                         "recommended_action": stuck_info.get('recommended_action')
-#                     }
-#                 })
-            
-#             # PHASE 2: ADAPTIVE PLANNING (enhanced with goal awareness)
-#             adaptation = None
-#             if result_analysis.get('status') in ['failed', 'partial'] or result_analysis.get('stuck_pattern'):
-#                 await send_socket_message_to_session(session, {
-#                     "type": "thinking", 
-#                     "data": {"step_id": step.id, "phase": "adapting", "message": "Planning goal-oriented adaptation..."}
-#                 })
-                
-#                 remaining_steps = [{"id": s.id, "action": s.action, "description": s.description} for s in current_steps[i+1:]]
-#                 adaptation = await AdaptivePlanner.should_adapt_plan(result_analysis, remaining_steps, llm)
-                
-#                 if adaptation:
-#                     session.execution_context['adaptations_made'].append({
-#                         "step_id": step.id,
-#                         "reason": adaptation.get('reason'),
-#                         "action": adaptation.get('action'),
-#                         "goal_context": session.goal_tracker.main_goal,
-#                         "timestamp": datetime.now().isoformat()
-#                     })
-#                     log_to_socket(f"🔄 Goal-oriented adaptation: {adaptation.get('reason')}")
-            
-#             # Update memory and context
-#             step_memory = f"Step {step.id}: {result_analysis.get('what_happened', raw_output)}\n"
-#             session.execution_context['memory_chain'] += step_memory
-#             session.execution_context['variables'].update(result_analysis.get('data_extracted', {}))
-            
-#             # Update goal progress
-#             progress_delta = result_analysis.get('goal_progress_delta', 0)
-#             if progress_delta > 0:
-#                 session.goal_tracker.current_progress = min(100, session.goal_tracker.current_progress + progress_delta)
-            
-#             # Store results
-#             session.execution_context['step_results'].append({
-#                 "step_id": step.id,
-#                 "result": raw_output,
-#                 "analysis": result_analysis,
-#                 "adaptation": adaptation,
-#                 "goal_progress": session.goal_tracker.current_progress,
-#                 "completed_at": datetime.now().isoformat()
-#             })
-            
-#             session.executed_steps.append({
-#                 "step_id": step.id,
-#                 "description": step.description,
-#                 "result": raw_output,
-#                 "analysis": result_analysis,
-#                 "goal_contribution": step_analysis.get('goal_contribution'),
-#                 "completed_at": datetime.now().isoformat()
-#             })
-            
-#             # Send completion with goal tracking
-#             await send_socket_message_to_session(session, {
-#                 "type": "step_complete",
-#                 "data": {
-#                     "step_id": step.id,
-#                     "step_number": i + 1,
-#                     "result": raw_output,
-#                     "analysis": result_analysis,
-#                     "adaptation": adaptation,
-#                     "goal_progress": session.goal_tracker.current_progress,
-#                     "goal_summary": session.goal_tracker.get_goal_summary(),
-#                     "variables": session.execution_context['variables']
-#                 }
-#             })
-            
-#             log_to_socket(f"✅ Step {step.id}: {result_analysis.get('status', 'completed')} (Goal: {session.goal_tracker.current_progress}%)")
-            
-#             # PHASE 2: APPLY ADAPTATIONS (same as before)
-#             if adaptation:
-#                 if adaptation.get('action') == 'retry':
-#                     log_to_socket("🔄 Retrying step with goal focus")
-#                     continue
-#                 elif adaptation.get('action') == 'skip':
-#                     log_to_socket("⏭️ Skipping to next step")
-#                 elif adaptation.get('action') == 'add_step':
-#                     new_step_data = adaptation.get('new_step', {})
-#                     if new_step_data:
-#                         class TempStep:
-#                             def __init__(self, data):
-#                                 self.id = data.get('id', step.id + 0.5)
-#                                 self.action = data.get('action', 'wait')
-#                                 self.description = data.get('description', 'Goal-oriented adaptive step')
-#                                 self.params = data.get('params', {})
-                        
-#                         new_step = TempStep(new_step_data)
-#                         current_steps.insert(i + 1, new_step)
-#                         log_to_socket(f"➕ Added goal-focused step: {new_step.description}")
-            
-#             i += 1
-        
-#         # Final goal completion
-#         final_goal_summary = session.goal_tracker.get_goal_summary()
-        
-#         await send_socket_message_to_session(session, {
-#             "type": "steps_complete", 
-#             "data": {
-#                 "total_completed": len(current_steps),
-#                 "adaptations_made": len(session.execution_context.get('adaptations_made', [])),
-#                 "session_persistent": True,
-#                 "goal_tracking_summary": {
-#                     "main_goal": session.goal_tracker.main_goal,
-#                     "final_progress": session.goal_tracker.current_progress,
-#                     "deviation_count": session.goal_tracker.deviation_count,
-#                     "sub_goals": session.goal_tracker.sub_goals,
-#                     "goal_achieved": session.goal_tracker.current_progress >= 90
-#                 },
-#                 "intelligence_summary": {
-#                     "successful_steps": len([r for r in session.execution_context['step_results'] if r.get('analysis', {}).get('status') == 'success']),
-#                     "adaptations": session.execution_context.get('adaptations_made', []),
-#                     "variables": session.execution_context['variables']
-#                 }
-#             }
-#         })
-        
-#         goal_status = "🎯 GOAL ACHIEVED!" if session.goal_tracker.current_progress >= 90 else f"🎯 Goal {session.goal_tracker.current_progress}% complete"
-       
-#         log_to_socket(f"{goal_status} - Made {len(session.execution_context.get('adaptations_made', []))} adaptations, {session.goal_tracker.deviation_count} course corrections")
-       
-#     except Exception as e:
-#         logger.error(f"❌ Goal-oriented execution failed: {e}", exc_info=True)
-#         log_to_socket(f"❌ Execution failed: {str(e)}")
-#         await send_socket_message_to_session(session, {"type": "error", "data": str(e)})
 
 async def run_steps_logic(config: ExecuteStepsRequest, session: UserSession):
     """Execute steps with intelligence, adaptation, goal tracking AND advanced features"""  # 🆕 NEW: Updated description
@@ -564,7 +217,10 @@ async def run_steps_logic(config: ExecuteStepsRequest, session: UserSession):
     
     try:
         # Initialize LLM
+        logger.info(f"🐛 DEBUG: run_steps_logic started for session {session.session_id}")
+        logger.info(f"🐛 DEBUG: About to initialize LLM")
         llm = await _initialize_llm_helper(config.llm_provider, config.llm_model_name, config.llm_api_key)
+        logger.info(f"🐛 DEBUG: LLM initialized successfully")
         log_to_socket("🧠 Intelligent agent with goal tracking initialized")
         
         # 🆕 NEW: Show enabled features
@@ -581,16 +237,16 @@ async def run_steps_logic(config: ExecuteStepsRequest, session: UserSession):
             log_to_socket(f"📁 Data export formats: {', '.join(advanced_features['export_formats'])}")
         
         # Create browser if needed
-        if not session.browser:
-            log_to_socket("🌐 Creating browser...")
-            session.browser = CustomBrowser(config=BrowserConfig(headless=True))
-            session.browser_context = await session.browser.new_context(
-                config=BrowserContextConfig(
-                    no_viewport=False, 
-                    browser_window_size=BrowserContextWindowSize(width=1280, height=720),
-                    save_downloads_path=f"/tmp/downloads_{session.session_id}"
-                )
-            )
+        # if not session.browser:
+        #     log_to_socket("🌐 Creating browser...")
+        #     session.browser = CustomBrowser(config=BrowserConfig(headless=True))
+        #     session.browser_context = await session.browser.new_context(
+        #         config=BrowserContextConfig(
+        #             no_viewport=False, 
+        #             browser_window_size=BrowserContextWindowSize(width=1280, height=720),
+        #             save_downloads_path=f"/tmp/downloads_{session.session_id}"
+        #         )
+        #     )
         
         # Initialize Goal Tracker
         if not hasattr(session, 'goal_tracker') or session.goal_tracker is None:
@@ -727,47 +383,7 @@ async def run_steps_logic(config: ExecuteStepsRequest, session: UserSession):
                     i += 1
                     continue
             
-            # 🆕 NEW: Captcha avoidance check
-            # if session.execution_context['advanced_features'].get('captcha_avoidance', True):
-            #     try:
-            #         current_page = await session.browser_context.get_current_page()
-            #         captcha_check = await current_page.evaluate("""
-            #             () => {
-            #                 const captchaSelectors = [
-            #                     '.captcha', '.recaptcha', '.hcaptcha',
-            #                     '[id*="captcha"]', '[class*="captcha"]',
-            #                     'iframe[src*="recaptcha"]', 'iframe[src*="hcaptcha"]',
-            #                     '.g-recaptcha', '#recaptcha'
-            #                 ];
-                            
-            #                 for (const sel of captchaSelectors) {
-            #                     const el = document.querySelector(sel);
-            #                     if (el && el.offsetParent !== null) {
-            #                         return 'captcha_detected';
-            #                     }
-            #                 }
-            #                 return 'no_captcha';
-            #             }
-            #         """)
-                    
-            #         if captcha_check == 'captcha_detected':
-            #             log_to_socket("🤖 Captcha detected - attempting avoidance strategies")
-                        
-            #             await send_socket_message_to_session(session, {
-            #                 "type": "captcha_detected",
-            #                 "data": {
-            #                     "message": "Captcha detected, implementing avoidance strategy",
-            #                     "strategies": ["wait_retry", "alternative_approach"]
-            #                 }
-            #             })
-                        
-            #             # Simple avoidance: wait and retry
-            #             await asyncio.sleep(3)
-            #             await current_page.reload()
-            #             log_to_socket("🔄 Page reloaded to avoid captcha")
-                        
-            #     except Exception as e:
-            #         log_to_socket(f"🤖 Captcha check error: {str(e)}")
+            
             
             # PHASE 1: PRE-STEP ANALYSIS (with goal context)
             await send_socket_message_to_session(session, {
@@ -1019,6 +635,7 @@ Execute this step intelligently while keeping the main goal in mind."""
         log_to_socket(f"{goal_status} - Made {len(session.execution_context.get('adaptations_made', []))} adaptations, {session.goal_tracker.deviation_count} course corrections")
        
     except Exception as e:
+        logger.error(f"🐛 DEBUG: Exception in run_steps_logic: {str(e)}", exc_info=True)
         logger.error(f"❌ Goal-oriented execution failed: {e}", exc_info=True)
         log_to_socket(f"❌ Execution failed: {str(e)}")
         await send_socket_message_to_session(session, {"type": "error", "data": str(e)})
@@ -1170,375 +787,6 @@ Remember: This is session {session.session_id[:8]} - maintain context isolation 
     return context_prompt
 
 
-
-# async def run_steps_logic(config: ExecuteStepsRequest, session: UserSession):
-#     """Execute steps with intelligence, adaptation, and goal tracking"""
-#     logger.info(f"🚀 Starting goal-oriented execution for session {session.session_id}")
-    
-#     # Import intelligence modules
-#     from src.intelligence.step_analyzer import StepAnalyzer, AdaptivePlanner
-#     from src.intelligence.goal_tracker import GoalTracker
-    
-#     # Initialize session state safely
-#     if not hasattr(session, 'execution_context') or session.execution_context is None:
-#         session.execution_context = {}
-    
-#     session.execution_context.setdefault('current_url', '')
-#     session.execution_context.setdefault('variables', {})
-#     session.execution_context.setdefault('step_results', [])
-#     session.execution_context.setdefault('memory_chain', '')
-#     session.execution_context.setdefault('adaptations_made', [])
-    
-#     if not hasattr(session, 'executed_steps'):
-#         session.executed_steps = []
-#     if not hasattr(session, 'current_step_index'):
-#         session.current_step_index = 0
-    
-#     def log_to_socket(msg, *args, **kwargs):
-#         log_message = msg % args if args else str(msg)
-#         asyncio.create_task(send_socket_message_to_session(session, {"type": "log", "data": log_message}))
-    
-#     try:
-#         # Initialize LLM
-#         llm = await _initialize_llm_helper(config.llm_provider, config.llm_model_name, config.llm_api_key)
-#         log_to_socket("🧠 Intelligent agent with goal tracking initialized")
-        
-#         # Create browser if needed
-#         if not session.browser:
-#             log_to_socket("🌐 Creating browser...")
-#             session.browser = CustomBrowser(config=BrowserConfig(headless=False))
-#             session.browser_context = await session.browser.new_context(
-#                 config=BrowserContextConfig(
-#                     no_viewport=False, 
-#                     browser_window_size=BrowserContextWindowSize(width=1280, height=720),
-#                     save_downloads_path=f"/tmp/downloads_{session.session_id}"
-#                 )
-#             )
-        
-#         # Initialize Goal Tracker
-#         if not hasattr(session, 'goal_tracker') or session.goal_tracker is None:
-#             # Extract main goal from first step or overall context
-#             main_goal = f"Complete task: {config.steps[0].description if config.steps else 'Execute steps'}"
-#             session.goal_tracker = GoalTracker(main_goal)
-            
-#             # Decompose goal into sub-goals
-#             await session.goal_tracker.decompose_goal(llm)
-#             log_to_socket(f"🎯 Goal set: {main_goal}")
-            
-#             # Send goal information to frontend
-#             await send_socket_message_to_session(session, {
-#                 "type": "goal_initialized",
-#                 "data": {
-#                     "main_goal": main_goal,
-#                     "sub_goals": session.goal_tracker.sub_goals,
-#                     "progress": 0
-#                 }
-#             })
-        
-#         # Convert steps to mutable list for adaptation
-#         current_steps = list(config.steps[config.start_from:])
-#         i = 0
-        
-#         while i < len(current_steps):
-#             step = current_steps[i]
-#             step_dict = {"id": step.id, "action": step.action, "description": step.description, "params": step.params}
-            
-#             log_to_socket(f"🎯 Step {i+1}/{len(current_steps)}: {step.description}")
-            
-#             # GOAL TRACKING: Check alignment before step
-#             await send_socket_message_to_session(session, {
-#                 "type": "thinking", 
-#                 "data": {"step_id": step.id, "phase": "goal_checking", "message": "Checking goal alignment..."}
-#             })
-            
-#             alignment = await session.goal_tracker.check_alignment(
-#                 session.execution_context, 
-#                 step.description, 
-#                 llm
-#             )
-            
-#             # Send goal status update
-#             await send_socket_message_to_session(session, {
-#                 "type": "goal_status",
-#                 "data": {
-#                     "alignment": alignment.get('alignment'),
-#                     "progress": alignment.get('progress_percentage', 0),
-#                     "reasoning": alignment.get('reasoning', ''),
-#                     "next_focus": alignment.get('next_focus', '')
-#                 }
-#             })
-            
-#             # Handle major deviations
-#             if alignment.get('alignment') == 'major_deviation':
-#                 log_to_socket(f"⚠️ Major deviation detected: {alignment.get('reasoning')}")
-                
-#                 correction = await session.goal_tracker.suggest_course_correction(
-#                     alignment.get('reasoning', 'Unknown deviation'),
-#                     session.execution_context,
-#                     llm
-#                 )
-                
-#                 await send_socket_message_to_session(session, {
-#                     "type": "course_correction",
-#                     "data": {
-#                         "deviation_reason": alignment.get('reasoning'),
-#                         "correction": correction,
-#                         "urgency": correction.get('urgency', 'medium')
-#                     }
-#                 })
-                
-#                 log_to_socket(f"🔄 Course correction: {correction.get('action')}")
-                
-#                 # Apply correction if needed
-#                 if correction.get('correction_type') == 'skip_step':
-#                     log_to_socket("⏭️ Skipping step due to course correction")
-#                     i += 1
-#                     continue
-            
-#             # PHASE 1: PRE-STEP ANALYSIS (with goal context)
-#             await send_socket_message_to_session(session, {
-#                 "type": "thinking", 
-#                 "data": {"step_id": step.id, "phase": "analyzing", "message": "Analyzing step with goal context..."}
-#             })
-            
-#             step_analysis = await StepAnalyzer.analyze_before_step(step_dict, session.execution_context, llm, session.goal_tracker)
-#             log_to_socket(f"🧠 Goal: {step_analysis.get('goal', 'Execute step')}")
-            
-#             # Send step start with analysis
-#             await send_socket_message_to_session(session, {
-#                 "type": "step_start", 
-#                 "data": {
-#                     "step_id": step.id,
-#                     "step_number": i + 1,
-#                     "total": len(current_steps),
-#                     "description": step.description,
-#                     "analysis": step_analysis,
-#                     "goal_alignment": step_analysis.get('goal_alignment')
-#                 }
-#             })
-            
-#             # EXECUTE STEP
-#             try:
-#                 # Build intelligent context prompt with goal awareness
-#                 context_prompt = f"""You are an intelligent browser agent working toward a specific goal.
-
-# MAIN GOAL: {session.goal_tracker.main_goal}
-# GOAL PROGRESS: {session.goal_tracker.current_progress}%
-
-# CURRENT STEP:
-# GOAL: {step_analysis.get('goal', step.description)}
-# ACTION: {step.action}
-# PARAMETERS: {json.dumps(step.params)}
-# GOAL CONTRIBUTION: {step_analysis.get('goal_contribution', 'Unknown')}
-
-# CONTEXT:
-# {session.execution_context.get('memory_chain', '')[-400:]}
-
-# EXPECTATIONS: {step_analysis.get('expectations', 'Unknown')}
-# SUCCESS CRITERIA: {step_analysis.get('success_criteria', 'Step completes')}
-
-# IMPORTANT: Stay focused on the main goal. If you encounter distractions (popups, ads, irrelevant content), ignore them and stay on track toward: {session.goal_tracker.main_goal}
-
-# Execute this step intelligently while keeping the main goal in mind."""
-                
-#                 await send_socket_message_to_session(session, {
-#                     "type": "thinking", 
-#                     "data": {"step_id": step.id, "phase": "executing", "message": f"Executing: {step_analysis.get('goal', step.description)}"}
-#                 })
-                
-#                 # Create and run step agent
-#                 step_agent = CustomAgent(
-#                     task=context_prompt,
-#                     llm=llm,
-#                     browser=session.browser,
-#                     browser_context=session.browser_context,
-#                     controller=CustomController(),
-#                     system_prompt_class=CustomSystemPrompt,
-#                     agent_prompt_class=CustomAgentMessagePrompt,
-#                     max_actions_per_step=1,
-#                     use_vision=True,
-#                     max_failures=1
-#                 )
-                
-#                 step_result = await asyncio.wait_for(step_agent.run(max_steps=3), timeout=60.0)
-#                 raw_output = step_result.final_result() or f"Completed step {step.id}"
-                
-#             except Exception as e:
-#                 logger.error(f"❌ Step {step.id} failed: {e}")
-#                 raw_output = f"Step failed: {str(e)}"
-            
-#             # PHASE 1: POST-STEP ANALYSIS (with goal context)
-#             await send_socket_message_to_session(session, {
-#                 "type": "thinking", 
-#                 "data": {"step_id": step.id, "phase": "validating", "message": "Validating results against goal..."}
-#             })
-            
-#             # Update current URL
-#             try:
-#                 current_page = await session.browser_context.get_current_page()
-#                 session.execution_context['current_url'] = current_page.url
-#             except:
-#                 pass
-            
-#             result_analysis = await StepAnalyzer.analyze_after_step(step_dict, raw_output, session.execution_context, llm, session.goal_tracker)
-            
-#             # Check for stuck patterns
-#             if result_analysis.get('stuck_pattern'):
-#                 stuck_info = result_analysis['stuck_pattern']
-#                 log_to_socket(f"🔄 Stuck pattern detected: {stuck_info.get('reason')}")
-                
-#                 await send_socket_message_to_session(session, {
-#                     "type": "stuck_detected",
-#                     "data": {
-#                         "reason": stuck_info.get('reason'),
-#                         "solutions": stuck_info.get('solutions', []),
-#                         "recommended_action": stuck_info.get('recommended_action')
-#                     }
-#                 })
-            
-#             # PHASE 2: ADAPTIVE PLANNING (enhanced with goal awareness)
-#             adaptation = None
-#             if result_analysis.get('status') in ['failed', 'partial'] or result_analysis.get('stuck_pattern'):
-#                 await send_socket_message_to_session(session, {
-#                     "type": "thinking", 
-#                     "data": {"step_id": step.id, "phase": "adapting", "message": "Planning goal-oriented adaptation..."}
-#                 })
-                
-#                 remaining_steps = [{"id": s.id, "action": s.action, "description": s.description} for s in current_steps[i+1:]]
-#                 adaptation = await AdaptivePlanner.should_adapt_plan(result_analysis, remaining_steps, llm)
-                
-#                 if adaptation:
-#                     session.execution_context['adaptations_made'].append({
-#                         "step_id": step.id,
-#                         "reason": adaptation.get('reason'),
-#                         "action": adaptation.get('action'),
-#                         "goal_context": session.goal_tracker.main_goal,
-#                         "timestamp": datetime.now().isoformat()
-#                     })
-#                     log_to_socket(f"🔄 Goal-oriented adaptation: {adaptation.get('reason')}")
-            
-#             # Update memory and context
-#             step_memory = f"Step {step.id}: {result_analysis.get('what_happened', raw_output)}\n"
-#             session.execution_context['memory_chain'] += step_memory
-#             session.execution_context['variables'].update(result_analysis.get('data_extracted', {}))
-            
-#             # Update goal progress
-#             progress_delta = result_analysis.get('goal_progress_delta', 0)
-#             if progress_delta > 0:
-#                 session.goal_tracker.current_progress = min(100, session.goal_tracker.current_progress + progress_delta)
-            
-#             # Store results
-#             session.execution_context['step_results'].append({
-#                 "step_id": step.id,
-#                 "result": raw_output,
-#                 "analysis": result_analysis,
-#                 "adaptation": adaptation,
-#                 "goal_progress": session.goal_tracker.current_progress,
-#                 "completed_at": datetime.now().isoformat()
-#             })
-            
-#             session.executed_steps.append({
-#                 "step_id": step.id,
-#                 "description": step.description,
-#                 "result": raw_output,
-#                 "analysis": result_analysis,
-#                 "goal_contribution": step_analysis.get('goal_contribution'),
-#                 "completed_at": datetime.now().isoformat()
-#             })
-            
-#             # Send completion with goal tracking
-#             await send_socket_message_to_session(session, {
-#                 "type": "step_complete",
-#                 "data": {
-#                     "step_id": step.id,
-#                     "step_number": i + 1,
-#                     "result": raw_output,
-#                     "analysis": result_analysis,
-#                     "adaptation": adaptation,
-#                     "goal_progress": session.goal_tracker.current_progress,
-#                     "goal_summary": session.goal_tracker.get_goal_summary(),
-#                     "variables": session.execution_context['variables']
-#                 }
-#             })
-            
-#             log_to_socket(f"✅ Step {step.id}: {result_analysis.get('status', 'completed')} (Goal: {session.goal_tracker.current_progress}%)")
-            
-#             # PHASE 2: APPLY ADAPTATIONS (same as before)
-#             if adaptation:
-#                 if adaptation.get('action') == 'retry':
-#                     log_to_socket("🔄 Retrying step with goal focus")
-#                     continue
-#                 elif adaptation.get('action') == 'skip':
-#                     log_to_socket("⏭️ Skipping to next step")
-#                 elif adaptation.get('action') == 'add_step':
-#                     new_step_data = adaptation.get('new_step', {})
-#                     if new_step_data:
-#                         class TempStep:
-#                             def __init__(self, data):
-#                                 self.id = data.get('id', step.id + 0.5)
-#                                 self.action = data.get('action', 'wait')
-#                                 self.description = data.get('description', 'Goal-oriented adaptive step')
-#                                 self.params = data.get('params', {})
-                        
-#                         new_step = TempStep(new_step_data)
-#                         current_steps.insert(i + 1, new_step)
-#                         log_to_socket(f"➕ Added goal-focused step: {new_step.description}")
-            
-#             i += 1
-        
-#         # Final goal completion
-#         final_goal_summary = session.goal_tracker.get_goal_summary()
-        
-#         await send_socket_message_to_session(session, {
-#             "type": "steps_complete", 
-#             "data": {
-#                 "total_completed": len(current_steps),
-#                 "adaptations_made": len(session.execution_context.get('adaptations_made', [])),
-#                 "session_persistent": True,
-#                 "goal_tracking_summary": {
-#                     "main_goal": session.goal_tracker.main_goal,
-#                     "final_progress": session.goal_tracker.current_progress,
-#                     "deviation_count": session.goal_tracker.deviation_count,
-#                     "sub_goals": session.goal_tracker.sub_goals,
-#                     "goal_achieved": session.goal_tracker.current_progress >= 90
-#                 },
-#                 "intelligence_summary": {
-#                     "successful_steps": len([r for r in session.execution_context['step_results'] if r.get('analysis', {}).get('status') == 'success']),
-#                     "adaptations": session.execution_context.get('adaptations_made', []),
-#                     "variables": session.execution_context['variables']
-#                 }
-#             }
-#         })
-        
-#         goal_status = "🎯 GOAL ACHIEVED!" if session.goal_tracker.current_progress >= 90 else f"🎯 Goal {session.goal_tracker.current_progress}% complete"
-        
-#         log_to_socket(f"{goal_status} - Made {len(session.execution_context.get('adaptations_made', []))} adaptations, {session.goal_tracker.deviation_count} course corrections")
-        
-#     except Exception as e:
-#         logger.error(f"❌ Goal-oriented execution failed: {e}", exc_info=True)
-#         log_to_socket(f"❌ Execution failed: {str(e)}")
-#         await send_socket_message_to_session(session, {"type": "error", "data": str(e)})        
-
-
-# async def stream_browser_view(session: UserSession):
-#     """Periodically captures and sends screenshots for a specific session."""
-#     while (session.current_task and not session.current_task.done() and 
-#            session.browser_context and session.browser):
-#         try:
-#             if hasattr(session.browser_context, 'browser') and session.browser_context.browser:
-#                 playwright_browser = session.browser_context.browser.playwright_browser
-#                 if playwright_browser and playwright_browser.contexts:
-#                     pw_context = playwright_browser.contexts[0]
-#                     if pw_context and pw_context.pages:
-#                         page = next((p for p in reversed(pw_context.pages) if p.url != "about:blank"), None)
-#                         if page and not page.is_closed():
-#                             screenshot_bytes = await page.screenshot(type="jpeg", quality=70)
-#                             b64_img = base64.b64encode(screenshot_bytes).decode('utf-8')
-#                             await send_socket_message_to_session(session, {"type": "stream", "data": b64_img})
-#         except Exception as e:
-#             logger.debug(f"Screenshot capture failed for session {session.session_id}: {e}")
-        
-#         await asyncio.sleep(0.5)
 # In your stream_browser_view function, replace logger calls with prints:
 async def stream_browser_view(session: UserSession):
     """Periodically captures and sends screenshots for a specific session with debug logging."""
@@ -1768,6 +1016,8 @@ Each step should be specific and executable."""
         logger.error(f"Error creating execution plan: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
 @app.post("/api/agent/execute-steps")
 async def execute_steps(request: ExecuteStepsRequest):
     """Execute steps sequentially with memory chain"""
@@ -1778,7 +1028,21 @@ async def execute_steps(request: ExecuteStepsRequest):
     if session.current_task and not session.current_task.done():
         raise HTTPException(status_code=409, detail="Agent already running in this session")
     
-    # Start step execution (keeps session persistent)
+    # 🔧 CREATE BROWSER IMMEDIATELY
+    if not session.browser:
+        session.browser = CustomBrowser(config=BrowserConfig(headless=False))
+        session.browser_context = await session.browser.new_context(
+            config=BrowserContextConfig(
+                no_viewport=False, 
+                browser_window_size=BrowserContextWindowSize(width=1280, height=720),
+                save_downloads_path=f"/tmp/downloads_{session.session_id}"
+            )
+        )
+        # Navigate to initial page
+        page = await session.browser_context.get_current_page()
+        await page.goto("data:text/html,<html><body><h1>Ready</h1></body></html>")
+    
+    # Start step execution
     session.current_task = asyncio.create_task(run_steps_logic(request, session))
     
     return {
@@ -1786,6 +1050,7 @@ async def execute_steps(request: ExecuteStepsRequest):
         "session_id": session.session_id,
         "total_steps": len(request.steps)
     }
+        
 
 @app.post("/api/agent/continue-steps")
 async def continue_with_more_steps(request: ExecuteStepsRequest):
@@ -1799,6 +1064,32 @@ async def continue_with_more_steps(request: ExecuteStepsRequest):
     
     # Mark session as persistent to keep browser alive
     session.persistent = True
+    
+    # 🔧 FIX: Ensure browser exists (should already exist from first execution)
+    if not session.browser:
+        logger.warning(f"⚠️ Browser missing for continue operation in session {session.session_id[:8]}, creating new one")
+        # Use same browser creation logic as execute_steps
+        session.browser = CustomBrowser(config=BrowserConfig(
+            headless=False,
+            extra_browser_args=[
+                f"--user-data-dir=/tmp/chrome_session_{session.session_id}",
+                "--no-first-run",
+                "--disable-dev-shm-usage", 
+                "--no-sandbox"
+            ]
+        ))
+        
+        session.browser_context = await session.browser.new_context(
+            config=BrowserContextConfig(
+                no_viewport=False,
+                browser_window_size=BrowserContextWindowSize(width=1280, height=720),
+                save_downloads_path=f"/tmp/downloads_{session.session_id}"
+            )
+        )
+        
+        if not hasattr(session, 'execution_context') or session.execution_context is None:
+            session.execution_context = {}
+        session.execution_context['browser_ready'] = True
     
     # Continue execution with existing memory and browser
     session.current_task = asyncio.create_task(run_steps_logic(request, session))
@@ -1821,7 +1112,8 @@ async def continue_with_more_steps(request: ExecuteStepsRequest):
         "session_id": request.session_id,
         "new_steps": len(request.steps),
         "features_enabled": enabled_features,
-        "existing_memory": len(getattr(session, 'execution_context', {}).get('memory_chain', ''))
+        "existing_memory": len(getattr(session, 'execution_context', {}).get('memory_chain', '')),
+        "browser_ready": session.execution_context.get('browser_ready', False)
     }
     
 @app.post("/api/session/{session_id}/cleanup")
@@ -1911,24 +1203,37 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             "data": f"Connected to session {session_id[:8]}"
         }))
         
-        # Send session status
-        execution_context = getattr(session, 'execution_context', {})
-        await websocket.send_text(json.dumps({
-            "type": "log", 
-            "data": f"Session ready - Browser: {'✅' if session.browser else '❌'}, Steps completed: {len(getattr(session, 'executed_steps', []))}"
-        }))
+        # 🔧 FIX: Wait for browser to be ready before starting stream
+        max_wait = 10  # Maximum 10 seconds
+        wait_count = 0
+        while wait_count < max_wait:
+            if (session.browser and session.browser_context and 
+                hasattr(session, 'execution_context') and 
+                session.execution_context.get('browser_ready', False)):
+                break
+            await asyncio.sleep(0.5)
+            wait_count += 0.5
         
-        # Wait a moment for agent to potentially start
-        await asyncio.sleep(1)
-        
-        # Start browser streaming if task is running
-        if session.current_task and not session.current_task.done():
+        if session.browser and session.browser_context:
             logger.info(f"📹 Starting browser stream for session {session_id[:8]}")
+            await websocket.send_text(json.dumps({
+                "type": "log",
+                "data": f"✅ Browser ready - Starting video stream"
+            }))
             streamer_task = asyncio.create_task(stream_browser_view(session))
+        else:
+            await websocket.send_text(json.dumps({
+                "type": "log", 
+                "data": "⚠️ Browser not ready - streaming unavailable"
+            }))
         
         # Keep connection alive while task is running
         while session.current_task and not session.current_task.done():
-            await asyncio.sleep(1)
+            max_wait = 10
+            wait_count = 0
+            while wait_count < max_wait and not (session.browser and session.browser_context):
+                await asyncio.sleep(0.5)
+                wait_count += 0.5
         
         # Send final message when task completes
         await websocket.send_text(json.dumps({
@@ -1963,29 +1268,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
